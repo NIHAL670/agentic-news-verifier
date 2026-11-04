@@ -10,7 +10,11 @@ pinned: false
 
 # 🤖 Agentic Fake News Verifier
 
-An AI-powered fact-checking environment built for the **Meta PyTorch OpenEnv Hackathon**. This environment tests how effectively an LLM agent can verify news headlines through a multi-step reasoning workflow.
+An **evaluation environment for LLM agents**, built for the **Meta PyTorch OpenEnv Hackathon**. It tests how effectively an agent verifies news headlines through a multi-step reasoning workflow: gather evidence first, then commit to a verdict.
+
+It includes an OpenEnv-compliant FastAPI server, a shaped reward function, per-task graders, and a baseline inference script that runs an LLM (Qwen2.5-72B-Instruct by default) against every task with structured logs.
+
+> The YAML block at the top of this file is the Hugging Face Spaces configuration and is required for deployment.
 
 ## Environment Description
 
@@ -68,6 +72,34 @@ Each observation contains:
 
 All rewards are clamped to the range `(0.01, 0.99)` — never exactly 0 or 1.
 
+## Reward analysis & known limitations
+
+After the hackathon I audited the environment the way I would audit any evaluation: by asking which agent strategies the reward actually favours. Measured cumulative reward per episode on `task-1`:
+
+| Agent strategy | Episode reward |
+|---|---|
+| Verify correctly, no search | 0.80 |
+| Search once, then verify correctly | 0.95 |
+| Search 4×, then verify correctly | 1.19 (score clamped to 0.99) |
+| Search 5×, **never answer** | 0.47 |
+| Search 4×, then verify **incorrectly** | 0.44 |
+| Search once, then verify **incorrectly** | 0.20 |
+
+**Findings**
+
+1. **Reward hacking via stalling.** Repeated searches return no new evidence but still earn 0.08 each, so padding the episode with searches beats the efficient path (1.19 vs 0.95).
+2. **Not answering is rewarded.** An agent that never verifies scores 0.47, more than double an agent that searches once and answers wrongly (0.20). The environment rewards activity, not a correct decision.
+3. **Wrong verdicts aren't penalised.** An incorrect label earns the same 0.05 as a no-op step.
+4. **Difficulty labels aren't calibrated.** All three tasks use the same mechanics, a single fixed search result, and a binary label; "hard" isn't measurably harder for a model.
+5. **The grader rewards keywords.** `fake_news_grader` gives 0.38 for a required keyword (e.g. `"study"`) appearing in the evidence text, which can be matched without the agent understanding the evidence.
+
+**Fixes I would make in the next version**
+
+- Give repeated searches with no new information a small *negative* reward, and add a per-step cost.
+- Give episodes that end without a verdict a terminal reward below that of any answered episode, and give wrong verdicts a clear penalty.
+- Score the final verdict separately from process rewards, so the headline metric is accuracy.
+- Expand to a larger task set with retrieval over multiple, partly conflicting sources, and calibrate difficulty from measured model pass rates.
+
 ## API Endpoints
 
 | Endpoint | Method | Description |
@@ -124,3 +156,7 @@ docker run -p 7860:7860 fake-news-verifier
 ## License
 
 MIT
+
+## Author
+
+**Nihal Yadav**, AI Trainer (LLM evaluation & software engineering) · M.Tech AI & ML, IIT Delhi · [GitHub](https://github.com/NIHAL670) · [LinkedIn](https://linkedin.com/in/nihal-yadav-5131582b8)
